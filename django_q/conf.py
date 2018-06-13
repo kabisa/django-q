@@ -1,7 +1,7 @@
 import logging
 from copy import deepcopy
 from signal import signal
-from multiprocessing import cpu_count, Queue
+from multiprocessing import cpu_count
 
 # django
 from django.utils.translation import ugettext_lazy as _
@@ -9,6 +9,10 @@ from django.conf import settings
 
 # external
 import os
+import pkg_resources
+
+# local
+from django_q.queues import Queue
 
 # optional
 try:
@@ -111,6 +115,11 @@ class Conf(object):
     # Number of seconds to wait for a worker to finish.
     TIMEOUT = conf.get('timeout', None)
 
+    # Whether to acknowledge unsuccessful tasks.
+    # This causes failed tasks to be considered delivered, thereby removing them from
+    # the task queue. Defaults to False.
+    ACK_FAILURES = conf.get('ack_failures', False)
+
     # Number of seconds to wait for acknowledgement before retrying a task
     # Only works with brokers that guarantee delivery. Defaults to 60 seconds.
     RETRY = conf.get('retry', 60)
@@ -146,8 +155,11 @@ class Conf(object):
     # The redis stats key
     Q_STAT = 'django_q:{}:cluster'.format(PREFIX)
 
-    # Optional Rollbar key
+    # Optional rollbar key
     ROLLBAR = conf.get('rollbar', {})
+
+    # Optional error reporting setup
+    ERROR_REPORTER = conf.get('error_reporter', {})
 
     # OSX doesn't implement qsize because of missing sem_getvalue()
     try:
@@ -182,6 +194,7 @@ if not logger.handlers:
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
+
 # rollbar
 if Conf.ROLLBAR:
     rollbar_conf = deepcopy(Conf.ROLLBAR)
@@ -193,6 +206,38 @@ if Conf.ROLLBAR:
 
 else:
     rollbar = None
+
+
+# Error Reporting Interface
+class ErrorReporter(object):
+
+    # initialize with iterator of reporters (better name, targets?)
+    def __init__(self, reporters):
+        self.targets = [target for target in reporters]
+
+    # report error to all configured targets
+    def report(self):
+        for t in self.targets:
+            t.report()
+
+
+# error reporting setup (sentry or rollbar)
+if Conf.ERROR_REPORTER:
+    error_conf = deepcopy(Conf.ERROR_REPORTER)
+    try:
+        reporters = []
+        # iterate through the configured error reporters,
+        # and instantiate an ErrorReporter using the provided config
+        for name, conf in error_conf.items():
+            for entry in pkg_resources.iter_entry_points(
+                    'djangoq.errorreporters', name):
+                Reporter = entry.load()
+                reporters.append(Reporter(**conf))
+        error_reporter = ErrorReporter(reporters)
+    except ImportError:
+        error_reporter = None
+else:
+    error_reporter = None
 
 
 # get parent pid compatibility

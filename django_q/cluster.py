@@ -4,19 +4,13 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from builtins import range
-
-from future import standard_library
-
-standard_library.install_aliases()
-
 # Standard
 import importlib
 import signal
 import socket
 import ast
 from time import sleep
-from multiprocessing import Queue, Event, Process, Value, current_process
+from multiprocessing import Event, Process, Value, current_process
 
 # external
 import arrow
@@ -27,13 +21,15 @@ from django.utils.translation import ugettext_lazy as _
 from django import db
 
 # Local
-import signing
-import tasks
-
-from django_q.conf import Conf, logger, psutil, get_ppid, rollbar
+from django_q import tasks
+from django_q.compat import range
+from django_q.conf import Conf, logger, psutil, get_ppid, error_reporter, rollbar
 from django_q.models import Task, Success, Schedule
+from django_q.signing import SignedPackage, BadSignature
 from django_q.status import Stat, Status
 from django_q.brokers import get_broker
+from django_q.signals import pre_execute
+from django_q.queues import Queue
 
 
 class Cluster(object):
@@ -300,8 +296,8 @@ def pusher(task_queue, event, broker=None):
                 ack_id = task[0]
                 # unpack the task
                 try:
-                    task = signing.SignedPackage.loads(task[1])
-                except (TypeError, signing.BadSignature) as e:
+                    task = SignedPackage.loads(task[1])
+                except (TypeError, BadSignature) as e:
                     logger.error(e)
                     broker.fail(ack_id)
                     continue
@@ -328,12 +324,12 @@ def monitor(result_queue, broker=None):
             save_cached(task, broker)
         else:
             save_task(task, broker)
-        # acknowledge and log the result
+        # acknowledge result
+        ack_id = task.pop('ack_id', False)
+        if ack_id and (task['success'] or task.get('ack_failure', False)):
+            broker.acknowledge(ack_id)
+        # log the result
         if task['success']:
-            # acknowledge
-            ack_id = task.pop('ack_id', False)
-            if ack_id:
-                broker.acknowledge(ack_id)
             # log success
             logger.info(_("Processed [{}]").format(task['name']))
         else:
@@ -368,18 +364,25 @@ def worker(task_queue, result_queue, timer, timeout=Conf.TIMEOUT):
                 f = getattr(m, func)
             except (ValueError, ImportError, AttributeError) as e:
                 result = (e, False)
+                if error_reporter:
+                    error_reporter.report()
                 if rollbar:
                     rollbar.report_exc_info()
         # We're still going
         if not result:
             db.close_old_connections()
+            timer_value = task['kwargs'].pop('timeout', timeout or 0)
+            # signal execution
+            pre_execute.send(sender="django_q", func=f, task=task)
             # execute the payload
-            timer.value = task['kwargs'].pop('timeout', timeout or 0)  # Busy
+            timer.value = timer_value  # Busy
             try:
                 res = f(*task['args'], **task['kwargs'])
                 result = (res, True)
             except Exception as e:
                 result = ('{}'.format(e), False)
+                if error_reporter:
+                    error_reporter.report()
                 if rollbar:
                     rollbar.report_exc_info()
         # Process result
@@ -452,11 +455,11 @@ def save_cached(task, broker):
             if iter_count and len(group_list) == iter_count - 1:
                 group_args = '{}:{}:args'.format(broker.list_key, group)
                 # collate the results into a Task result
-                results = [signing.SignedPackage.loads(broker.cache.get(k))['result'] for k in group_list]
+                results = [SignedPackage.loads(broker.cache.get(k))['result'] for k in group_list]
                 results.append(task['result'])
                 task['result'] = results
                 task['id'] = group
-                task['args'] = signing.SignedPackage.loads(broker.cache.get(group_args))
+                task['args'] = SignedPackage.loads(broker.cache.get(group_args))
                 task.pop('iter_count', None)
                 task.pop('group', None)
                 if task.get('iter_cached', None):
@@ -475,7 +478,7 @@ def save_cached(task, broker):
                 tasks.async_chain(task['chain'], group=group, cached=task['cached'], sync=task['sync'], broker=broker)
         # save the task
         broker.cache.set(task_key,
-                         signing.SignedPackage.dumps(task),
+                         SignedPackage.dumps(task),
                          timeout)
     except Exception as e:
         logger.error(e)

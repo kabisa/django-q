@@ -59,6 +59,13 @@ timeout
 The number of seconds a worker is allowed to spend on a task before it's terminated. Defaults to ``None``, meaning it will never time out.
 Set this to something that makes sense for your project. Can be overridden for individual tasks.
 
+.. _ack_failures:
+
+ack_failures
+~~~~~~~~~~~~
+
+When set to ``True``, also acknowledge unsuccessful tasks. This causes failed tasks to be considered as successful deliveries, thereby removing them from the task queue. Can also be set per-task by passing the ``ack_failure`` option to :func:`async`. Defaults to ``False``.
+
 .. _retry:
 
 retry
@@ -229,7 +236,7 @@ All connection keywords are supported. See the `iron-mq <https://github.com/iron
 
 sqs
 ~~~
-To use Amazon SQS as a broker you need to provide the AWS region and credentials::
+To use Amazon SQS as a broker you need to provide the AWS region and credentials either via the config, or any other boto3 configuration method::
 
     # example SQS broker connection
 
@@ -241,9 +248,9 @@ To use Amazon SQS as a broker you need to provide the AWS region and credentials
         'queue_limit': 100,
         'bulk': 5,
         'sqs': {
-            'aws_region': 'us-east-1',
-            'aws_access_key_id': 'ac-Idr.....YwflZBaaxI',
-            'aws_secret_access_key': '500f7b....b0f302e9'
+            'aws_region': 'us-east-1',  # optional
+            'aws_access_key_id': 'ac-Idr.....YwflZBaaxI',  # optional
+            'aws_secret_access_key': '500f7b....b0f302e9'  # optional
         }
     }
 
@@ -353,6 +360,26 @@ scheduler
 You can disable the scheduler by setting this option to ``False``. This will reduce a little overhead if you're not using schedules, but is most useful if you want to temporarily disable all schedules.
 Defaults to ``True``
 
+.. _error_reporter:
+
+error_reporter
+~~~~~~~~~~~~~~
+You can redirect worker exceptions directly to various error reporters (for example `Rollbar <https://rollbar.com/>`__ or `Sentry <https://docs.sentry.io/>`__) by installing Django Q with the necessary `extras <https://setuptools.readthedocs.io/en/latest/setuptools.html#declaring-extras-optional-features-with-their-own-dependencies>`__.
+
+To enable installed error reporters, you must provide the configuration settings required by an error reporter extension::
+
+    # error_reporter config--rollbar example
+    Q_CLUSTER = {
+        'error_reporter': {
+            'rollbar': {
+                'access_token': '32we33a92a5224jiww8982',
+                'environment': 'Django-Q'
+            }
+        }
+    }
+
+For more information on error reporters and developing error reporting plugins for Django Q, see :doc:`errors<errors>`.
+
 rollbar
 ~~~~~~~
 You can redirect worker exceptions directly to your `Rollbar <https://rollbar.com/>`__ dashboard by installing the python notifier with ``pip install rollbar`` and adding this configuration dictionary to your config::
@@ -367,6 +394,10 @@ You can redirect worker exceptions directly to your `Rollbar <https://rollbar.co
 
 Please check the Pyrollbar `configuration reference <https://github.com/rollbar/pyrollbar#configuration-reference>`__ for more options.
 Note that you will need a `Rollbar <https://rollbar.com/>`__ account and access token to use this feature.
+
+
+.. note::
+    The ``rollbar`` setting is included for backwards compatibility, for those who utilized rollbar configuration before the ``error_reporter`` interface was introduced. Note that Rollbar support can be configured either via the ``rollbar`` setting, or via the ``django-q-rollbar`` package and enabled via the ``error_reporter`` setting above.
 
 cpu_affinity
 ~~~~~~~~~~~~

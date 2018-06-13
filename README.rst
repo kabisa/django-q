@@ -21,7 +21,7 @@ Features
 -  PaaS compatible with multiple instances
 -  Multi cluster monitor
 -  Redis, Disque, IronMQ, SQS, MongoDB or ORM
--  Rollbar support
+-  Rollbar and Sentry support
 
 Requirements
 ~~~~~~~~~~~~
@@ -31,7 +31,7 @@ Requirements
 -  `Arrow <https://github.com/crsmithdev/arrow>`__
 -  `Blessed <https://github.com/jquast/blessed>`__
 
-Tested with: Python 2.7 & 3.5. Django 1.8.14, 1.9.8 and 1.10rc1
+Tested with: Python 2.7 & 3.6. Django 1.8.19, 1.11.11 and 2.0.x
 
 Brokers
 ~~~~~~~
